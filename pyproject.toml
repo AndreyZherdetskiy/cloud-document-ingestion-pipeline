@@ -1,0 +1,75 @@
+[project]
+name = "doc-pipeline"
+version = "0.1.0"
+description = "Cloud Document Ingestion Pipeline — control-plane API"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.141,<0.142",
+    "uvicorn[standard]>=0.52,<0.53",
+    "pydantic>=2.10,<3",
+    "pydantic-settings>=2.6,<3",
+    "sqlalchemy[asyncio]>=2.0,<2.1",
+    "asyncpg>=0.31,<0.32",
+    "alembic>=1.14,<2",
+    "uuid6>=2024,<2026",
+    "structlog>=26,<27",
+    "opentelemetry-api>=1.44,<1.45",
+    "opentelemetry-sdk>=1.44,<1.45",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.44,<1.45",
+    "opentelemetry-instrumentation-fastapi>=0.65b0,<0.66",
+    "PyJWT>=2.9,<3",
+    "cryptography>=50,<51",
+    "redis>=8.1,<9",
+    "boto3>=1.43,<1.44",
+    "httpx>=0.28,<0.29",
+    "tenacity>=9,<10",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<9",
+    "pytest-asyncio>=0.24,<0.25",
+    "httpx>=0.28,<0.29",
+    "ruff>=0.8,<0.9",
+    "mypy>=1.13,<1.14",
+    "PyYAML>=6",
+    "moto[s3]>=5,<6",
+    "pre-commit>=4,<5",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/doc_pipeline"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+packages = ["doc_pipeline"]
+
+[[tool.mypy.overrides]]
+module = ["boto3", "boto3.*", "botocore", "botocore.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib --strict-markers"
+pythonpath = ["src"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "integration: requires Compose / LocalStack",
+    "e2e: live stack",
+]
