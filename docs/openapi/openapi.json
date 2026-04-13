@@ -1,0 +1,1980 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Cloud Document Ingestion Pipeline",
+    "summary": "Control-plane API for document ingestion; binary objects go to S3 via presign.",
+    "description": "## Control vs data plane\n\nThis API manages metadata, jobs, and audit. **Files never stream through the API.** Clients obtain a **presigned PUT** URL and upload directly to S3.\n\n## Auth and headers\n\n- **JWT** Bearer (RS256) identifies the tenant and role.\n- **Idempotency-Key** on `POST /v1/documents`.\n- **X-Correlation-ID** must be a UUIDv7 when supplied; the server generates one if missing.\n- Errors use **RFC 7807** Problem Details (`application/problem+json`).\n- Cross-tenant IDs return **404**, not 403.\n\n## Outbound webhooks\n\nClients may receive signed outbound webhooks (`document.processed` / `document.failed`) with header `X-Webhook-Signature` (HMAC-SHA256).\n",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000",
+      "description": "Local Compose"
+    }
+  ],
+  "paths": {
+    "/v1/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Liveness probe",
+        "description": "Returns 200 when the process is up. Does not check dependencies.",
+        "operationId": "health_v1_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health V1 Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/ready": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Readiness probe",
+        "description": "Returns 200 when PostgreSQL accepts connections. Fails with 503 when the database is unreachable.",
+        "operationId": "ready_v1_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Ready V1 Ready Get"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "PostgreSQL unavailable"
+          }
+        }
+      }
+    },
+    "/v1/documents": {
+      "post": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Create document metadata",
+        "description": "Creates a DRAFT document record for the caller's tenant. Files never stream through this API — obtain a presigned PUT URL next. Requires Idempotency-Key. ROLE_API_CLIENT (and admin) may create.",
+        "operationId": "create_document_v1_documents_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Client idempotency key (required). Same key with matching payload returns 200 and the existing document; same key with a different payload returns 409.",
+              "title": "Idempotency-Key"
+            },
+            "description": "Client idempotency key (required). Same key with matching payload returns 200 and the existing document; same key with a different payload returns 409."
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles.",
+              "title": "Authorization"
+            },
+            "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentCreate"
+              },
+              "examples": {
+                "invoice": {
+                  "summary": "Create invoice metadata",
+                  "description": "Metadata only — upload the PDF via POST /v1/uploads/presign.",
+                  "value": {
+                    "document_type": "INVOICE",
+                    "external_ref": "inv-001",
+                    "file_name": "invoice.pdf",
+                    "content_type": "application/pdf",
+                    "checksum_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Document created in DRAFT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentResponse"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "Idempotent replay — same document returned"
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Authenticated but role not permitted"
+          },
+          "409": {
+            "description": "Idempotency-Key reused with a different payload or invalid transition"
+          },
+          "422": {
+            "description": "Request validation failed"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "List documents",
+        "description": "Lists documents for the caller's tenant with optional filters. Cursor pagination only (default limit 50, max 200). No offset.",
+        "operationId": "list_documents_v1_documents_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DocumentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by document status.",
+              "title": "Status"
+            },
+            "description": "Filter by document status."
+          },
+          {
+            "name": "document_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DocumentType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by document type.",
+              "title": "Document Type"
+            },
+            "description": "Filter by document type."
+          },
+          {
+            "name": "external_ref",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by exact external_ref.",
+              "title": "External Ref"
+            },
+            "description": "Filter by exact external_ref."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from a previous page's next_cursor.",
+              "title": "Cursor"
+            },
+            "description": "Opaque cursor from a previous page's next_cursor."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Page size (default 50, max 200).",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Page size (default 50, max 200)."
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles.",
+              "title": "Authorization"
+            },
+            "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Authenticated but role not permitted"
+          },
+          "422": {
+            "description": "Request validation failed"
+          }
+        }
+      }
+    },
+    "/v1/documents/{document_id}": {
+      "get": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Get document",
+        "description": "Returns document metadata, latest job summary, and up to five recent audit events. Foreign tenant IDs return 404 (not 403).",
+        "operationId": "get_document_v1_documents__document_id__get",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Document Id"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles.",
+              "title": "Authorization"
+            },
+            "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentDetailResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Authenticated but role not permitted"
+          },
+          "404": {
+            "description": "Document not found in the caller's tenant scope"
+          },
+          "422": {
+            "description": "Request validation failed"
+          }
+        }
+      }
+    },
+    "/v1/documents/{document_id}/cancel": {
+      "post": {
+        "tags": [
+          "documents"
+        ],
+        "summary": "Cancel document or reset expired upload",
+        "description": "Cancels a non-terminal document via the status state machine (to CANCELLED). If the document is UPLOADING and its upload TTL has expired, resets to DRAFT so the client can re-presign.",
+        "operationId": "cancel_document_v1_documents__document_id__cancel_post",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Document Id"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles.",
+              "title": "Authorization"
+            },
+            "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document cancelled or reset for re-presign",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Authenticated but role not permitted"
+          },
+          "404": {
+            "description": "Document not found in the caller's tenant scope"
+          },
+          "409": {
+            "description": "Idempotency-Key reused with a different payload or invalid transition"
+          },
+          "422": {
+            "description": "Request validation failed"
+          }
+        }
+      }
+    },
+    "/v1/uploads/presign": {
+      "post": {
+        "tags": [
+          "uploads"
+        ],
+        "summary": "Issue presigned S3 PUT URL",
+        "description": "Returns a time-limited presigned PUT URL for direct client upload to S3. On success the document transitions DRAFT → UPLOADING and an uploads row is created with PENDING status. MIME type is checked against the tenant allowlist before any URL is issued. Default TTL is 15 minutes (tenant cap 60 minutes).",
+        "operationId": "presign_upload_v1_uploads_presign_post",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles.",
+              "title": "Authorization"
+            },
+            "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresignRequest"
+              },
+              "examples": {
+                "pdf_upload": {
+                  "summary": "Presign PDF upload",
+                  "description": "After creating document metadata, request a presigned PUT URL. Upload the file directly to S3 with required_headers.",
+                  "value": {
+                    "document_id": "01900000-0000-7000-8000-000000000001",
+                    "content_type": "application/pdf",
+                    "checksum_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Presigned URL issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresignResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Business validation failed (e.g. MIME not in tenant allowlist)"
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Authenticated but role not permitted"
+          },
+          "404": {
+            "description": "Document not found in the caller's tenant scope"
+          },
+          "422": {
+            "description": "Request validation failed"
+          },
+          "429": {
+            "description": "Rate limit exceeded"
+          }
+        }
+      }
+    },
+    "/v1/jobs": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "List jobs",
+        "description": "Lists processing jobs for the caller's tenant. Filters: status, document_id, older_than (e.g. 30m). Cursor pagination.",
+        "operationId": "list_jobs_v1_jobs_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/JobStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by job status.",
+              "title": "Status"
+            },
+            "description": "Filter by job status."
+          },
+          {
+            "name": "document_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by parent document id.",
+              "title": "Document Id"
+            },
+            "description": "Filter by parent document id."
+          },
+          {
+            "name": "older_than",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only jobs created at or before now−duration (e.g. 30m, 2h).",
+              "title": "Older Than"
+            },
+            "description": "Only jobs created at or before now−duration (e.g. 30m, 2h)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from a previous page's next_cursor.",
+              "title": "Cursor"
+            },
+            "description": "Opaque cursor from a previous page's next_cursor."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Page size (default 50, max 200).",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Page size (default 50, max 200)."
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles.",
+              "title": "Authorization"
+            },
+            "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Authenticated but role not permitted"
+          },
+          "422": {
+            "description": "Request validation failed"
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Get job",
+        "description": "Returns a single job by id. Foreign tenant IDs return 404 (not 403).",
+        "operationId": "get_job_v1_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles.",
+              "title": "Authorization"
+            },
+            "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Authenticated but role not permitted"
+          },
+          "404": {
+            "description": "Job not found in the caller's tenant scope"
+          },
+          "422": {
+            "description": "Request validation failed"
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}/retry": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Retry failed or stuck job",
+        "description": "Operator only. Retries a job in FAILED or STUCK status: status → PENDING, attempt incremented. Other statuses return 409. Writes audit event JOB_RETRY.",
+        "operationId": "retry_job_v1_jobs__job_id__retry_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles.",
+              "title": "Authorization"
+            },
+            "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Authenticated but role not permitted"
+          },
+          "404": {
+            "description": "Job not found in the caller's tenant scope"
+          },
+          "409": {
+            "description": "Invalid job status transition"
+          },
+          "422": {
+            "description": "Request validation failed"
+          }
+        }
+      }
+    },
+    "/v1/jobs/{job_id}/cancel": {
+      "post": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Cancel job",
+        "description": "Operator or Admin. Cancels a non-terminal job (PENDING/RUNNING/FAILED/STUCK). SUCCEEDED or already CANCELLED returns 409.",
+        "operationId": "cancel_job_v1_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles.",
+              "title": "Authorization"
+            },
+            "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Authenticated but role not permitted"
+          },
+          "404": {
+            "description": "Job not found in the caller's tenant scope"
+          },
+          "409": {
+            "description": "Invalid job status transition"
+          },
+          "422": {
+            "description": "Request validation failed"
+          }
+        }
+      }
+    },
+    "/v1/audit": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "List audit events for a document",
+        "description": "Requires document_id. Returns append-only audit events for that document in the caller's tenant. Optional filters: from, to, event_type. Foreign tenant document IDs return 404.",
+        "operationId": "list_audit_v1_audit_get",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Document UUIDv7 whose audit timeline to return (required).",
+              "title": "Document Id"
+            },
+            "description": "Document UUIDv7 whose audit timeline to return (required)."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive lower bound on created_at (UTC).",
+              "title": "From"
+            },
+            "description": "Inclusive lower bound on created_at (UTC)."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Inclusive upper bound on created_at (UTC).",
+              "title": "To"
+            },
+            "description": "Inclusive upper bound on created_at (UTC)."
+          },
+          {
+            "name": "event_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by exact event_type (e.g. JOB_RETRY).",
+              "title": "Event Type"
+            },
+            "description": "Filter by exact event_type (e.g. JOB_RETRY)."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Opaque cursor from a previous page's next_cursor.",
+              "title": "Cursor"
+            },
+            "description": "Opaque cursor from a previous page's next_cursor."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Page size (default 50, max 200).",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Page size (default 50, max 200)."
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles.",
+              "title": "Authorization"
+            },
+            "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Authenticated but role not permitted"
+          },
+          "404": {
+            "description": "Document not found in the caller's tenant scope"
+          },
+          "422": {
+            "description": "Request validation failed (document_id required)"
+          }
+        }
+      }
+    },
+    "/v1/admin/dlq/replay": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Replay DLQ messages",
+        "description": "Platform Admin only. Accepts SQS message IDs from the DLQ and starts a redrive (message move) to the main ingestion queue. API clients receive 403.",
+        "operationId": "replay_dlq_v1_admin_dlq_replay_post",
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles.",
+              "title": "Authorization"
+            },
+            "description": "Bearer JWT (RS256); stub issuer locally, Cognito-compatible claims. Required. Missing or invalid token → 401. Claims: sub, tenant_id, roles."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DlqReplayRequest"
+              },
+              "examples": {
+                "two_messages": {
+                  "summary": "Redrive two DLQ messages",
+                  "description": "Platform Admin starts a message move from DLQ to the main queue.",
+                  "value": {
+                    "message_ids": [
+                      "msg-1",
+                      "msg-2"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Redrive accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DlqReplayResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid JWT"
+          },
+          "403": {
+            "description": "Authenticated but role not permitted (Platform Admin required)"
+          },
+          "422": {
+            "description": "Request validation failed"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ActorType": {
+        "type": "string",
+        "enum": [
+          "USER",
+          "SYSTEM",
+          "OPERATOR"
+        ],
+        "title": "ActorType"
+      },
+      "AuditEventBrief": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "Audit event UUIDv7."
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type",
+            "description": "Audit event type."
+          },
+          "from_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Status",
+            "description": "Previous status if a transition."
+          },
+          "to_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Status",
+            "description": "New status if a transition."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "When the audit event was recorded."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "event_type",
+          "created_at"
+        ],
+        "title": "AuditEventBrief"
+      },
+      "AuditEventResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "Audit event UUIDv7."
+          },
+          "document_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Document Id",
+            "description": "Document this event belongs to."
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id",
+            "description": "Related job when applicable."
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type",
+            "description": "Audit event type (e.g. JOB_RETRY, DOCUMENT_CREATED)."
+          },
+          "from_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Status",
+            "description": "Previous status if a transition."
+          },
+          "to_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Status",
+            "description": "New status if a transition."
+          },
+          "actor_type": {
+            "$ref": "#/components/schemas/ActorType",
+            "description": "Actor category (USER, SYSTEM, OPERATOR)."
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Id",
+            "description": "Actor subject id when known."
+          },
+          "correlation_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Correlation Id",
+            "description": "Correlation UUIDv7 for the request chain."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "When the audit event was recorded (UTC)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "document_id",
+          "event_type",
+          "actor_type",
+          "correlation_id",
+          "created_at"
+        ],
+        "title": "AuditEventResponse"
+      },
+      "AuditListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEventResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Audit events newest-first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Opaque cursor for the next page; null when no more items."
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "description": "Page size applied to this response."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "limit"
+        ],
+        "title": "AuditListResponse"
+      },
+      "DlqReplayRequest": {
+        "properties": {
+          "message_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Message Ids",
+            "description": "SQS message IDs in the DLQ to redrive to the main queue.",
+            "examples": [
+              [
+                "msg-1",
+                "msg-2"
+              ]
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "message_ids"
+        ],
+        "title": "DlqReplayRequest"
+      },
+      "DlqReplayResponse": {
+        "properties": {
+          "replayed_count": {
+            "type": "integer",
+            "title": "Replayed Count",
+            "description": "Number of message IDs accepted for redrive."
+          },
+          "message_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Message Ids",
+            "description": "Echo of message IDs submitted for replay."
+          }
+        },
+        "type": "object",
+        "required": [
+          "replayed_count",
+          "message_ids"
+        ],
+        "title": "DlqReplayResponse"
+      },
+      "DocumentCreate": {
+        "properties": {
+          "document_type": {
+            "$ref": "#/components/schemas/DocumentType",
+            "description": "Logical document type (INVOICE, KYC, CONTRACT)."
+          },
+          "external_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Ref",
+            "description": "Caller-side reference (invoice number, case id). Optional."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Human-readable document title."
+          },
+          "metadata": {
+            "type": "object",
+            "title": "Metadata",
+            "description": "Opaque caller metadata stored with the document."
+          },
+          "file_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name",
+            "description": "Original file name declared by the client."
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type",
+            "description": "Declared MIME type (e.g. application/pdf). Files are uploaded via presign, not this API."
+          },
+          "declared_size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Declared Size Bytes",
+            "description": "Declared object size in bytes (optional; enforced later via S3)."
+          },
+          "checksum_sha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checksum Sha256",
+            "description": "Optional SHA-256 hex digest (64 chars) declared at create time."
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_type"
+        ],
+        "title": "DocumentCreate"
+      },
+      "DocumentDetailResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "Document UUIDv7 primary key."
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Tenant Id",
+            "description": "Owning tenant UUIDv7 from the JWT."
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocumentStatus",
+            "description": "Current document lifecycle status."
+          },
+          "document_type": {
+            "$ref": "#/components/schemas/DocumentType",
+            "description": "Logical document type."
+          },
+          "external_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Ref",
+            "description": "Caller-side reference."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Human-readable title."
+          },
+          "file_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name",
+            "description": "Declared file name."
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type",
+            "description": "Declared MIME type."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Creation timestamp (UTC)."
+          },
+          "correlation_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Correlation Id",
+            "description": "Correlation UUIDv7 bound to this create."
+          },
+          "job": {
+            "$ref": "#/components/schemas/JobSummary",
+            "description": "Latest job summary for this document (empty when none)."
+          },
+          "recent_audit": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEventBrief"
+            },
+            "type": "array",
+            "title": "Recent Audit",
+            "description": "Up to five most recent audit events."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "tenant_id",
+          "status",
+          "document_type",
+          "created_at",
+          "correlation_id"
+        ],
+        "title": "DocumentDetailResponse"
+      },
+      "DocumentListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Page of documents for the caller tenant."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Opaque cursor for the next page; null when no more items."
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "description": "Page size applied to this response."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "limit"
+        ],
+        "title": "DocumentListResponse"
+      },
+      "DocumentResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "Document UUIDv7 primary key."
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Tenant Id",
+            "description": "Owning tenant UUIDv7 from the JWT."
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocumentStatus",
+            "description": "Current document lifecycle status."
+          },
+          "document_type": {
+            "$ref": "#/components/schemas/DocumentType",
+            "description": "Logical document type."
+          },
+          "external_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Ref",
+            "description": "Caller-side reference."
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title",
+            "description": "Human-readable title."
+          },
+          "file_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name",
+            "description": "Declared file name."
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type",
+            "description": "Declared MIME type."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "Creation timestamp (UTC)."
+          },
+          "correlation_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Correlation Id",
+            "description": "Correlation UUIDv7 bound to this create."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "tenant_id",
+          "status",
+          "document_type",
+          "created_at",
+          "correlation_id"
+        ],
+        "title": "DocumentResponse"
+      },
+      "DocumentStatus": {
+        "type": "string",
+        "enum": [
+          "DRAFT",
+          "UPLOADING",
+          "UPLOADED",
+          "QUEUED",
+          "SCANNING",
+          "EXTRACTING",
+          "PROCESSED",
+          "FAILED",
+          "CANCELLED"
+        ],
+        "title": "DocumentStatus"
+      },
+      "DocumentType": {
+        "type": "string",
+        "enum": [
+          "INVOICE",
+          "KYC",
+          "CONTRACT"
+        ],
+        "title": "DocumentType"
+      },
+      "JobListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/JobResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Page of jobs for the caller tenant."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "Opaque cursor for the next page; null when no more items."
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "description": "Page size applied to this response."
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "limit"
+        ],
+        "title": "JobListResponse"
+      },
+      "JobResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id",
+            "description": "Job UUIDv7 primary key."
+          },
+          "document_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Document Id",
+            "description": "Parent document UUIDv7."
+          },
+          "job_type": {
+            "$ref": "#/components/schemas/JobType",
+            "description": "Job type (INGESTION, PROCESSING)."
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus",
+            "description": "Current job status."
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt",
+            "description": "Current attempt number (starts at 1)."
+          },
+          "max_attempts": {
+            "type": "integer",
+            "title": "Max Attempts",
+            "description": "Maximum attempts before permanent failure."
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code",
+            "description": "Machine-readable error when failed."
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message",
+            "description": "Human-readable error when failed."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At",
+            "description": "When the job row was created (UTC)."
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At",
+            "description": "When the worker started."
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At",
+            "description": "When the job reached a terminal status."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "document_id",
+          "job_type",
+          "status",
+          "attempt",
+          "max_attempts",
+          "created_at"
+        ],
+        "title": "JobResponse"
+      },
+      "JobStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "RUNNING",
+          "SUCCEEDED",
+          "FAILED",
+          "STUCK",
+          "CANCELLED"
+        ],
+        "title": "JobStatus"
+      },
+      "JobSummary": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "Latest job id when present."
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status",
+            "description": "Latest job status when present."
+          },
+          "job_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Type",
+            "description": "Latest job type when present."
+          }
+        },
+        "type": "object",
+        "title": "JobSummary"
+      },
+      "JobType": {
+        "type": "string",
+        "enum": [
+          "INGESTION",
+          "PROCESSING"
+        ],
+        "title": "JobType"
+      },
+      "PresignRequest": {
+        "properties": {
+          "document_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Document Id",
+            "description": "Target document UUIDv7 (must be DRAFT in the caller tenant)."
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type",
+            "description": "MIME type the client will send on the S3 PUT (e.g. application/pdf). Must be in the tenant allowlist."
+          },
+          "checksum_sha256": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 64,
+            "title": "Checksum Sha256",
+            "description": "SHA-256 hex digest (64 chars) of the object bytes. Stored on the document; the S3 PUT header x-amz-checksum-sha256 is the Base64 form of this digest."
+          }
+        },
+        "type": "object",
+        "required": [
+          "document_id",
+          "content_type",
+          "checksum_sha256"
+        ],
+        "title": "PresignRequest"
+      },
+      "PresignResponse": {
+        "properties": {
+          "upload_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Upload Id",
+            "description": "Upload UUIDv7 row id (PENDING until S3 PUT completes)."
+          },
+          "presigned_url": {
+            "type": "string",
+            "title": "Presigned Url",
+            "description": "Time-limited S3 PUT URL — never logged server-side; client uploads directly."
+          },
+          "method": {
+            "type": "string",
+            "title": "Method",
+            "description": "HTTP method for the upload (always PUT)."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At",
+            "description": "UTC expiry of the presigned URL."
+          },
+          "s3_bucket": {
+            "type": "string",
+            "title": "S3 Bucket",
+            "description": "Destination S3 bucket name."
+          },
+          "s3_key": {
+            "type": "string",
+            "title": "S3 Key",
+            "description": "Object key: {tenant_id}/{document_id}/{sanitized_filename}."
+          },
+          "required_headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Required Headers",
+            "description": "Headers the client must include on PUT: Content-Type, checksum, SSE-KMS keys."
+          }
+        },
+        "type": "object",
+        "required": [
+          "upload_id",
+          "presigned_url",
+          "method",
+          "expires_at",
+          "s3_bucket",
+          "s3_key",
+          "required_headers"
+        ],
+        "title": "PresignResponse"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "documents",
+      "description": "Document metadata create/list/get."
+    },
+    {
+      "name": "uploads",
+      "description": "Presigned S3 upload URLs (files never stream through the API)."
+    },
+    {
+      "name": "jobs",
+      "description": "Processing jobs, retry, and cancel."
+    },
+    {
+      "name": "audit",
+      "description": "Append-only audit timeline for a document."
+    },
+    {
+      "name": "admin",
+      "description": "Platform admin operations such as DLQ replay."
+    },
+    {
+      "name": "health",
+      "description": "Liveness and readiness probes."
+    }
+  ]
+}
