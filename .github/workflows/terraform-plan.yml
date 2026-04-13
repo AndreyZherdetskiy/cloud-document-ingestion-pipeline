@@ -1,0 +1,36 @@
+# Terraform fmt/validate/plan for modules under terraform/.
+# Auth: GitHub Actions OIDC → AWS IAM role (ADR-007).
+# Do NOT configure AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY secrets.
+name: terraform-plan
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-plan.yml"
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC
+  pull-requests: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      # OIDC example (uncomment and set vars when an AWS account is wired):
+      # - uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     role-to-assume: ${{ vars.AWS_TERRAFORM_PLAN_ROLE_ARN }}
+      #     aws-region: ${{ vars.AWS_REGION }}
+      #     # Never pass aws-access-key-id / aws-secret-access-key here.
+      - name: Validate modules (no remote backend / no real AWS required)
+        run: make tf-validate
+      - name: Plan stub
+        run: |
+          echo "terraform plan stub — enable OIDC configure-aws-credentials + per-env plan when GO."
+          echo "Post plan summary as a PR comment once remote state is available."
