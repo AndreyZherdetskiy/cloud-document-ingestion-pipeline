@@ -1,0 +1,71 @@
+groups:
+  - name: doc_pipeline_alerts
+    rules:
+      - alert: DocPipelineDLQVisible
+        # Appendix B #1: DLQ ApproximateNumberOfMessagesVisible > 0
+        expr: doc_pipeline_sqs_dlq_visible_messages > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: DLQ has visible messages
+          description: >
+            doc_pipeline_sqs_dlq_visible_messages > 0. Poison messages need triage;
+            replay via POST /v1/admin/dlq/replay after root-cause fix.
+            See docs/runbooks/dlq-replay.md.
+
+      - alert: DocPipelineQueueOldestAge
+        # Appendix B #2: main queue oldest message age > 10 minutes (600s)
+        expr: doc_pipeline_sqs_queue_oldest_age_seconds > 600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Main queue oldest message exceeds 10 minutes
+          description: >
+            doc_pipeline_sqs_queue_oldest_age_seconds exceeds 600s. Backlog or stuck
+            worker — distinct from idle rate() NaN on throughput counters.
+            See docs/runbooks/incident-queue-backlog.md and docs/runbooks/stuck-jobs.md.
+
+      - alert: DocPipelineAPI5xxRate
+        # Appendix B #3: API 5xx rate > 1% over 5m (local Prom substitute for ALB 5xx)
+        expr: |
+          (
+            sum(rate(doc_pipeline_http_server_requests_total{http_response_status_code=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(doc_pipeline_http_server_requests_total[5m])), 1e-9)
+          ) * 100 > 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: API 5xx rate exceeds 1%
+          description: >
+            Local substitute for ALB HTTPCode_Target_5XX_Count / RequestCount > 1%.
+            Investigate api logs and traces (Jaeger), then check upstream deps
+            (Postgres, Redis, LocalStack/AWS).
+
+      - alert: DocPipelinePostgresCPUHigh
+        # Appendix B #4 local substitute: RDS CPU > 80%
+        expr: doc_pipeline_postgres_cpu_percent > 80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Postgres CPU substitute exceeds 80%
+          description: >
+            Local gauge mirroring Appendix B RDS CPU > 80% (10m). Check connection
+            pool pressure, slow queries, and worker concurrency.
+
+      - alert: DocPipelineWorkerDownWithQueueDepth
+        # Appendix B #5 local substitute: worker up=0 while main queue has depth
+        expr: doc_pipeline_worker_up == 0 and doc_pipeline_sqs_queue_visible_messages > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Worker down while main queue has messages
+          description: >
+            Local substitute for ECS RunningTaskCount=0 with queue depth > 0.
+            Restart worker / check Compose or ECS service health.
+            See docs/runbooks/stuck-jobs.md.
