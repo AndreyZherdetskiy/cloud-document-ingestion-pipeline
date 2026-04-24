@@ -1,0 +1,63 @@
+{
+  "widgets": [
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "SQS queue depth",
+        "region": "eu-central-1",
+        "metrics": [
+          ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "ENV-document-ingestion"],
+          [".", "ApproximateNumberOfMessagesVisible", "QueueName", "ENV-document-ingestion-dlq"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "Oldest message age",
+        "region": "eu-central-1",
+        "metrics": [
+          ["AWS/SQS", "ApproximateAgeOfOldestMessage", "QueueName", "ENV-document-ingestion"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "ALB 5xx / requests",
+        "region": "eu-central-1",
+        "metrics": [
+          ["AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "app/ENV-doc-pipeline-alb/SUFFIX"],
+          [".", "RequestCount", ".", "."]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "RDS CPU + ECS worker running",
+        "region": "eu-central-1",
+        "metrics": [
+          ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "ENV-doc-pipeline-db"],
+          ["ECS/ContainerInsights", "RunningTaskCount", "ClusterName", "ENV-doc-pipeline", "ServiceName", "ENV-worker"]
+        ]
+      }
+    }
+  ]
+}
