@@ -1,0 +1,54 @@
+# ADOT Collector config for AWS path (CloudWatch EMF + X-Ray).
+# Separate from Compose infra/otel/collector.yaml (Prometheus + Jaeger).
+# Apps remain OTLP-only — they never call PutMetricData / PutTraceSegments directly.
+#
+# Refs:
+#   https://aws-otel.github.io/docs/getting-started/collector
+#   https://docs.aws.amazon.com/xray/latest/devguide/xray-services-adot.html
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+  resourcedetection:
+    detectors: [env, ecs, ec2]
+    timeout: 2s
+
+exporters:
+  awsemf:
+    namespace: DocPipeline
+    region: ${AWS_REGION}
+    log_group_name: /aws/ecs/doc-pipeline/${ENVIRONMENT}/metrics
+    dimension_rollup_option: NoDimensionRollup
+    resource_to_telemetry_conversion:
+      enabled: true
+  awsxray:
+    region: ${AWS_REGION}
+    indexed_attributes:
+      - tenant_id
+      - document_id
+      - correlation_id
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [resourcedetection, batch]
+      exporters: [awsemf]
+    traces:
+      receivers: [otlp]
+      processors: [resourcedetection, batch]
+      exporters: [awsxray]
