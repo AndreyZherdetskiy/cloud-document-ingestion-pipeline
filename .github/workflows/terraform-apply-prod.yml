@@ -1,0 +1,31 @@
+# Production apply — manual only (workflow_dispatch) with environment reviewers.
+# Auth: GitHub Actions OIDC → AWS IAM role (ADR-007).
+# Do NOT store long-lived AWS access keys in GitHub Secrets.
+name: terraform-apply-prod
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for OIDC
+
+jobs:
+  apply-prod:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      # OIDC example (uncomment on human GO with a real account):
+      # - uses: aws-actions/configure-aws-credentials@v4
+      #   with:
+      #     role-to-assume: ${{ vars.AWS_TERRAFORM_PROD_APPLY_ROLE_ARN }}
+      #     aws-region: ${{ vars.AWS_REGION }}
+      - name: Apply prod stub
+        run: |
+          echo "Production apply stub — reviewers via GitHub Environment + OIDC only."
+          echo "Sequence: plan → apply → smoke + rollback link (previous ECS task definition)."
+          echo "No AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY in this workflow."
