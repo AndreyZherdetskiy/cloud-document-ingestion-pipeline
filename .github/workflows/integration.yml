@@ -1,0 +1,25 @@
+# Integration tests against ephemeral Postgres / Redis / LocalStack on the runner.
+# Stub: does not require a real AWS account. No long-lived AWS access keys.
+name: integration
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --frozen
+      # TODO: start Compose services (postgres, redis, localstack) on the runner, then:
+      #   make migrate && uv run pytest -m integration -q
+      - name: Integration stub
+        run: |
+          echo "Integration workflow stub — wire Compose + pytest -m integration when runner Docker is confirmed."
+          echo "Do not point this job at a real AWS account."
