@@ -1,0 +1,186 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "content": "**Idle `rate()` NaN is not an outage.** Flat counters yield empty PromQL `rate()` — normal with no traffic. DLQ visible > 0, queue age > 10m, and API 5xx > 1% are real signals (Appendix B / `docs/slo.md`). Traces: Jaeger only (Prometheus datasource).",
+        "mode": "markdown"
+      },
+      "title": "Operator notes",
+      "type": "text"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 3
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum(rate(doc_pipeline_documents_processed_total[5m])) by (tenant_slug)",
+          "legendFormat": "{{tenant_slug}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Document throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 3
+      },
+      "id": 3,
+      "targets": [
+        {
+          "expr": "doc_pipeline_sqs_dlq_visible_messages",
+          "legendFormat": "DLQ visible",
+          "refId": "A"
+        }
+      ],
+      "title": "DLQ depth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 3
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "doc_pipeline_sqs_queue_oldest_age_seconds",
+          "legendFormat": "oldest age",
+          "refId": "A"
+        }
+      ],
+      "title": "Queue oldest message age",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 11
+      },
+      "id": 5,
+      "targets": [
+        {
+          "expr": "(sum(rate(doc_pipeline_http_server_requests_total{http_response_status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(doc_pipeline_http_server_requests_total[5m])), 1e-9)) * 100",
+          "legendFormat": "5xx %",
+          "refId": "A"
+        }
+      ],
+      "title": "API 5xx rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 11
+      },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "doc_pipeline_sqs_queue_visible_messages",
+          "legendFormat": "main queue visible",
+          "refId": "A"
+        },
+        {
+          "expr": "doc_pipeline_worker_up",
+          "legendFormat": "worker up",
+          "refId": "B"
+        }
+      ],
+      "title": "Queue depth and worker up",
+      "type": "timeseries"
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["doc-pipeline", "stage1"],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Pipeline Overview",
+  "uid": "doc-pipeline-overview",
+  "version": 2
+}
