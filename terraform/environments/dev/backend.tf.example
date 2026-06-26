@@ -1,0 +1,20 @@
+# Copy to backend.tf and replace placeholders. No live account IDs in git.
+# terraform {
+#   backend "s3" {
+#     bucket         = "EXAMPLE_ACCOUNT-doc-pipeline-tfstate-dev"
+#     key            = "doc-pipeline/dev/terraform.tfstate"
+#     region         = "eu-central-1"
+#     dynamodb_table = "EXAMPLE_ACCOUNT-doc-pipeline-tflock-dev"
+#     encrypt        = true
+#   }
+# }
+
+terraform {
+  backend "s3" {
+    bucket         = "REPLACE_ACCOUNT_ID-doc-pipeline-tfstate-dev"
+    key            = "doc-pipeline/dev/terraform.tfstate"
+    region         = "eu-central-1"
+    dynamodb_table = "REPLACE_ACCOUNT_ID-doc-pipeline-tflock-dev"
+    encrypt        = true
+  }
+}
