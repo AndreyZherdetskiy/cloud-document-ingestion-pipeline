@@ -1,0 +1,17 @@
+# Example tfvars — copy to terraform.tfvars (gitignored). Placeholders only.
+aws_region  = "eu-central-1"
+environment = "prod"
+cost_center = "platform-doc-pipeline"
+owner       = "platform-sre"
+
+# Account / naming placeholders (spec §5.4) — not live IDs
+account_id = "000000000000"
+
+single_nat_gateway  = false
+force_destroy       = false
+enable_https        = false
+certificate_arn     = ""
+enable_read_replica = false
+
+# FinOps default_tags are applied via provider in providers.tf.example:
+# Project=doc-pipeline, Environment, CostCenter, Owner
