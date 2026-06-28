@@ -294,7 +294,8 @@ Verdict: **APPROVE** | **REQUEST CHANGES**. Working tree may be uncommitted — 
 
 ```bash
 cp .env.example .env
-uv sync
+uv sync --group dev
+make hooks          # or: uv run pre-commit install
 make compose-up
 make migrate
 make seed && make seed-prod-like

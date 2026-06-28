@@ -1,4 +1,4 @@
-.PHONY: help ci lint typecheck test-unit test-integration test-e2e export-openapi compose-up observability-up migrate seed seed-prod-like tf-validate ensure-terraform run-ingestion-worker run-processing-worker run-stuck-scanner gen-dev-jwt mint-jwt live-demo
+.PHONY: help ci lint typecheck test-unit test-integration test-e2e export-openapi compose-up observability-up migrate seed seed-prod-like tf-validate ensure-terraform run-ingestion-worker run-processing-worker run-stuck-scanner gen-dev-jwt mint-jwt live-demo hooks
 
 # Explicit -p beats COMPOSE_PROJECT_NAME env so sibling stacks never collide.
 COMPOSE_PROJECT ?= doc-pipeline
@@ -14,6 +14,7 @@ MODULES    := $(wildcard terraform/modules/*)
 
 help:
 	@echo "Quality:"
+	@echo "  make hooks         install git pre-commit hooks (uv run pre-commit install)"
 	@echo "  make ci            lint + typecheck + test-unit"
 	@echo "  make lint          ruff check + format check"
 	@echo "  make typecheck     mypy on src/doc_pipeline"
@@ -39,6 +40,9 @@ help:
 	@echo "  make tf-validate   init -backend=false + validate per module and environment root"
 
 ci: lint typecheck test-unit
+
+hooks:
+	uv run pre-commit install
 
 lint:
 	uv run ruff check src tests scripts

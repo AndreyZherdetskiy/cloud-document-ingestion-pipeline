@@ -46,6 +46,8 @@ Prerequisites: `uv`, Docker Compose. Bring the stack up (`make compose-up`) befo
 
 ```bash
 cp .env.example .env
+uv sync --group dev
+make hooks          # or: uv run pre-commit install
 make gen-dev-jwt    # RSA keypair → gitignored JWT files; patches .env
 make migrate
 make seed
