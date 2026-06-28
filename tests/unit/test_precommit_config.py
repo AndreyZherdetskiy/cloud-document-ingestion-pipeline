@@ -34,8 +34,16 @@ def test_pyproject_dev_group_includes_pre_commit() -> None:
     assert "pre-commit>=4,<5" in text
 
 
+def test_pre_commit_hooks_rev_is_v5_0_0() -> None:
+    text = PRE_COMMIT.read_text(encoding="utf-8")
+    repo_marker = "repo: https://github.com/pre-commit/pre-commit-hooks"
+    assert repo_marker in text
+    hooks_block = text.split(repo_marker)[1].split("repo:")[0]
+    assert "rev: v5.0.0" in hooks_block
+
+
 def test_makefile_hooks_installs_pre_commit() -> None:
-    text = (ROOT / "Makefile").read_text(encoding="utf-8")
-    assert "hooks:" in text
-    after = text.split("hooks:", 1)[1].split("\n\n", 1)[0]
-    assert "uv run pre-commit install" in after
+    text = (ROOT / "Makefile").read_text(encoding="utf-8").replace("\r\n", "\n")
+    assert "\nhooks:\n\tuv run pre-commit install\n" in text
+    assert "\nhooks-run:\n\tuv run pre-commit run --files " in text
+    assert "docker" not in text.split("\nhooks-run:")[1].split("\n\n", 1)[0].lower()

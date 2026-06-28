@@ -51,6 +51,13 @@ class Settings(BaseSettings):
         default=300,
         alias="SQS_VISIBILITY_TIMEOUT_SECONDS",
     )
+    # AWS ReceiveMessage hard max is 10; process the batch in-process, ACK per message.
+    sqs_max_number_of_messages: int = Field(
+        default=10,
+        ge=1,
+        le=10,
+        alias="SQS_MAX_NUMBER_OF_MESSAGES",
+    )
     jwt_issuer: str = Field(default="http://localhost:8000/dev-issuer", alias="JWT_ISSUER")
     jwt_audience: str = Field(default="doc-pipeline", alias="JWT_AUDIENCE")
     jwt_public_key_pem: str = Field(

@@ -12,15 +12,16 @@ from types import ModuleType
 
 import httpx
 import pytest
-from tests.e2e import conftest as e2e_conftest
 from tests.e2e.conftest import (
     DEFAULT_ROLES,
     POLL_INTERVAL_SECONDS,
     POLL_TIMEOUT_SECONDS,
+    _mint_dev_jwt,
     lookup_tenant_id,
     mint_jwt,
 )
 
+from doc_pipeline.config.settings import get_settings
 from doc_pipeline.domain.ids import generate_uuidv7
 
 pytestmark = pytest.mark.e2e
@@ -29,7 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _load_live_demo_module() -> ModuleType:
-    sys.modules.setdefault("mint_dev_jwt", e2e_conftest._mint_dev_jwt)
+    sys.modules.setdefault("mint_dev_jwt", _mint_dev_jwt)
     spec = importlib.util.spec_from_file_location(
         "live_ingest_demo",
         REPO_ROOT / "scripts" / "live_ingest_demo.py",
@@ -158,8 +159,6 @@ def test_foreign_tenant_document_is_404(
     auth_token_acme: str,
     http_client: httpx.Client,
 ) -> None:
-    from doc_pipeline.config.settings import get_settings
-
     document_id = _create_and_upload_invoice(
         http_client,
         base_url=api_base_url,

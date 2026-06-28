@@ -1,4 +1,4 @@
-.PHONY: help ci lint typecheck test-unit test-integration test-e2e export-openapi compose-up observability-up stack-up stack-down perf-up migrate seed seed-prod-like tf-validate ensure-terraform run-ingestion-worker run-processing-worker run-stuck-scanner gen-dev-jwt mint-jwt live-demo hooks
+.PHONY: help ci lint typecheck test-unit test-integration test-e2e export-openapi compose-up observability-up stack-up stack-down perf-up load-k6-health migrate seed seed-prod-like tf-validate ensure-terraform run-ingestion-worker run-processing-worker run-stuck-scanner gen-dev-jwt mint-jwt live-demo hooks hooks-run
 
 # Explicit -p beats COMPOSE_PROJECT_NAME env so sibling stacks never collide.
 COMPOSE_PROJECT ?= doc-pipeline
@@ -15,6 +15,7 @@ MODULES    := $(wildcard terraform/modules/*)
 help:
 	@echo "Quality:"
 	@echo "  make hooks         install git pre-commit hooks (uv run pre-commit install)"
+	@echo "  make hooks-run     run pre-commit on a small file set (no Docker)"
 	@echo "  make ci            lint + typecheck + test-unit"
 	@echo "  make lint          ruff check + format check"
 	@echo "  make typecheck     mypy on src/doc_pipeline"
@@ -35,6 +36,9 @@ help:
 	@echo "  make run-processing-worker  python -m doc_pipeline.worker.processing_main"
 	@echo "  make run-stuck-scanner      python -m doc_pipeline.worker.stuck_main"
 	@echo ""
+	@echo "Load (local characterization — not spec §10.1 SLA):"
+	@echo "  make load-k6-health  k6 health RPS ceiling on perf overlay (stdin, doc-pipeline network)"
+	@echo ""
 	@echo "Compose / data / infra:"
 	@echo "  make compose-up / observability-up / stack-up / stack-down / perf-up"
 	@echo "  make migrate / seed / seed-prod-like"
@@ -44,6 +48,9 @@ ci: lint typecheck test-unit
 
 hooks:
 	uv run pre-commit install
+
+hooks-run:
+	uv run pre-commit run --files tests/unit/test_precommit_config.py .pre-commit-config.yaml Makefile
 
 lint:
 	uv run ruff check src tests scripts
@@ -103,6 +110,13 @@ stack-down:
 perf-up:
 	$(COMPOSE) -f docker-compose.yml -f docker-compose.perf.yml up -d --build --wait \
 		--scale ingestion-worker=2 --scale processing-worker=2
+	docker image prune -af --filter "label=com.docker.compose.project=$(COMPOSE_PROJECT)"
+
+# k6 GET /v1/health ramping-arrival-rate; stdin script — WSL bind-mounts often miss scripts/k6.
+load-k6-health:
+	docker run --rm -i --network doc-pipeline \
+	  -e BASE_URL=http://api:8000 \
+	  grafana/k6 run - < scripts/k6/ceiling_health_rps.js
 
 migrate:
 	uv run alembic upgrade head

@@ -43,6 +43,7 @@ A subagent receives a self-contained brief; if the brief references spec/ADR/`do
 | [`docs/slo.md`](docs/slo.md) | SLI→SLO, metric names (tenant **slug** attributes), alert thresholds; Jaeger not Tempo | Observability, DoD, NFR |
 | [`docs/architecture.md`](docs/architecture.md) | C4 from spec §4; LocalStack vs AWS | Onboarding |
 | [`docs/ownership-raci.md`](docs/ownership-raci.md) | Cloud ownership matrix (ADR-008) | Infra / Gate A |
+| [`docs/perf/`](docs/perf/) | Recorded load-test facts (k6 health ceiling on perf overlay; laptop numbers are not spec §10.1 docs/h NFR) | Observability, load characterization |
 | `.superpowers/sdd/progress.md` | Task↔spec linkage (gitignored local SDD harness; no Task N in app code) | After each Task |
 
 Conflict priority: **product invariant** → `spec.md` + Accepted ADR; **Task / Acceptance order** → active plan; **agent operational rules** → `AGENTS.md`; **library/AWS APIs** → official docs for majors from spec §5 (Grounding).
@@ -298,7 +299,7 @@ uv sync --group dev
 make hooks          # or: uv run pre-commit install
 make compose-up
 make stack-up       # full stack (--build --wait; 1 process per service)
-make perf-up        # non-default overlay: uvicorn --workers 4, RATE_LIMIT 0, 2× ingestion + 2× processing; characterization only — not spec §8 SLA
+make perf-up        # non-default overlay: uvicorn --workers 4, RATE_LIMIT 0, prod-like pools (api 5+5, workers 3+2), SQS batch 10, 2× ingestion + 2× processing; characterization only — not spec §8 SLA
 make migrate
 make seed && make seed-prod-like
 make ci
@@ -389,6 +390,6 @@ Local gitignored harness (not Stage N; no Stage Done; no commit unless asked):
 
 - `PROMPT_STACK_VERSION_UPGRADE.md` — current stable FastAPI/boto3/Redis + **SQS/LocalStack** (not Kafka); then Phase A of full audit
 - `PROMPT_FULL_PROJECT_AUDIT_AND_DOCS.md` — live seed audit + EN operator docs + independent RU handbook
-- **Stage 3 perf overlay** — `docker-compose.perf.yml` + `make perf-up` (4 uvicorn workers, `RATE_LIMIT_PER_MINUTE=0`, small DB pools, OTel off, 2× ingestion + 2× processing workers); characterization only — not spec §8 SLA. Default `compose-up` stays postgres+redis+localstack; `make stack-down` always includes the perf file so scaled replicas do not linger.
+- **Stage 3 perf overlay** — `docker-compose.perf.yml` + `make perf-up` (4 uvicorn workers, `RATE_LIMIT_PER_MINUTE=0`, API pool 5+5 / workers 3+2, `SQS_MAX_NUMBER_OF_MESSAGES=10`, OTel off, 2× ingestion + 2× processing workers); characterization only — not spec §8 SLA. Do not raise Postgres `max_connections` as the first lever. Health RPS ceiling facts: [`docs/perf/ceiling-prodlike.md`](docs/perf/ceiling-prodlike.md) via `make load-k6-health` (stdin k6 on `doc-pipeline` network). Default `compose-up` stays postgres+redis+localstack; `make stack-down` always includes the perf file so scaled replicas do not linger.
 
 Always attach `PROMPT_COMMON.md`. Subagents: `composer-2.5` or `cursor-grok-4.5-high`; Implementer ≠ Reviewer.

@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from sqlalchemy import Select, func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from doc_pipeline.domain.enums import DocumentStatus, DocumentType
@@ -241,6 +242,35 @@ class SqlAlchemyDocumentService:
             created_at=row.created_at,
         )
 
+    async def _get_by_idempotency(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        idempotency_key: str,
+    ) -> Document | None:
+        row = await self._session.scalar(
+            select(Document).where(
+                Document.tenant_id == tenant_id,
+                Document.idempotency_key == idempotency_key,
+            )
+        )
+        return row if isinstance(row, Document) else None
+
+    def _replay_or_conflict(
+        self,
+        existing: Document,
+        *,
+        correlation_id: uuid.UUID,
+        body: DocumentCreate,
+    ) -> tuple[DocumentRecord, bool]:
+        record = self._to_record(existing)
+        record.correlation_id = correlation_id
+        if _record_fingerprint(record) != _payload_fingerprint(body):
+            raise ConflictError(
+                "Idempotency-Key already used with a different payload",
+            )
+        return record, False
+
     async def create(
         self,
         *,
@@ -250,21 +280,7 @@ class SqlAlchemyDocumentService:
         idempotency_key: str,
         body: DocumentCreate,
     ) -> tuple[DocumentRecord, bool]:
-        existing = await self._session.scalar(
-            select(Document).where(
-                Document.tenant_id == tenant_id,
-                Document.idempotency_key == idempotency_key,
-            )
-        )
-        if existing is not None:
-            record = self._to_record(existing)
-            record.correlation_id = correlation_id
-            if _record_fingerprint(record) != _payload_fingerprint(body):
-                raise ConflictError(
-                    "Idempotency-Key already used with a different payload",
-                )
-            return record, False
-
+        now = datetime.now(UTC)
         row = Document(
             id=generate_uuidv7(),
             tenant_id=tenant_id,
@@ -279,10 +295,25 @@ class SqlAlchemyDocumentService:
             checksum_sha256=body.checksum_sha256,
             file_size_bytes=body.declared_size_bytes,
             created_by=created_by,
+            created_at=now,
+            updated_at=now,
         )
         self._session.add(row)
-        await self._session.commit()
-        await self._session.refresh(row)
+        try:
+            await self._session.commit()
+        except IntegrityError:
+            await self._session.rollback()
+            existing = await self._get_by_idempotency(
+                tenant_id=tenant_id,
+                idempotency_key=idempotency_key,
+            )
+            if existing is None:
+                raise
+            return self._replay_or_conflict(
+                existing,
+                correlation_id=correlation_id,
+                body=body,
+            )
         record = self._to_record(row)
         record.correlation_id = correlation_id
         return record, True

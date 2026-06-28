@@ -41,6 +41,9 @@ async def test_ingestion_receive_message_uses_settings_visibility_timeout() -> N
     assert to_thread.await_args.kwargs["VisibilityTimeout"] == (
         settings.sqs_visibility_timeout_seconds
     )
+    assert to_thread.await_args.kwargs["MaxNumberOfMessages"] == (
+        settings.sqs_max_number_of_messages
+    )
 
 
 @pytest.mark.asyncio
@@ -65,6 +68,9 @@ async def test_processing_receive_message_uses_settings_visibility_timeout() -> 
     assert to_thread.await_args.kwargs["VisibilityTimeout"] == 300
     assert to_thread.await_args.kwargs["VisibilityTimeout"] == (
         settings.sqs_visibility_timeout_seconds
+    )
+    assert to_thread.await_args.kwargs["MaxNumberOfMessages"] == (
+        settings.sqs_max_number_of_messages
     )
 
 
@@ -91,7 +97,14 @@ async def test_legacy_consumer_receive_message_uses_settings_visibility_timeout(
     assert to_thread.await_args.kwargs["VisibilityTimeout"] == (
         settings.sqs_visibility_timeout_seconds
     )
+    assert to_thread.await_args.kwargs["MaxNumberOfMessages"] == (
+        settings.sqs_max_number_of_messages
+    )
 
 
 def test_settings_sqs_visibility_timeout_default_is_300() -> None:
     assert Settings().sqs_visibility_timeout_seconds == 300
+
+
+def test_settings_sqs_max_number_of_messages_default_is_10() -> None:
+    assert Settings().sqs_max_number_of_messages == 10

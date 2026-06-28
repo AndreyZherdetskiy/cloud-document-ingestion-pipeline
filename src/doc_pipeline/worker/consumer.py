@@ -10,6 +10,7 @@ import asyncio
 import signal
 from typing import Any
 
+import structlog
 from botocore.client import BaseClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -25,6 +26,7 @@ from doc_pipeline.observability.otel import configure_otel, shutdown_otel
 from doc_pipeline.worker.events import parse_s3_event_message
 from doc_pipeline.worker.handlers import handle_ingest_event
 
+logger = structlog.get_logger(__name__)
 _stop = asyncio.Event()
 
 _TERMINAL_ACK = frozenset(
@@ -72,38 +74,44 @@ async def run_once(
     hooks: tuple[StubVirusScanHook, StubOcrHook, StubExtractHook],
     redis: RedisSetNx | None = None,
 ) -> bool:
-    """Receive up to one message. Returns False when the stop event is set mid-idle."""
+    """Receive a batch; delete each message only after terminal status is committed."""
     if _stop.is_set():
         return False
     response: dict[str, Any] = await asyncio.to_thread(
         sqs.receive_message,
         QueueUrl=settings.sqs_queue_url,
-        MaxNumberOfMessages=1,
+        MaxNumberOfMessages=settings.sqs_max_number_of_messages,
         WaitTimeSeconds=10,
         VisibilityTimeout=settings.sqs_visibility_timeout_seconds,
     )
     messages = response.get("Messages") or []
-    if not messages:
-        return True
-    message = messages[0]
-    body = str(message["Body"])
-    receipt = str(message["ReceiptHandle"])
-    async with session_factory() as session:
-        status = await process_sqs_message(
-            session=session,
-            hooks=hooks,
-            settings=settings,
-            body=body,
-            redis=redis,
-        )
-    # Delete after success or after terminal FAILED/CANCELLED is committed (spec poison).
-    if status in _TERMINAL_ACK:
-        await asyncio.to_thread(
-            delete_message,
-            sqs,
-            queue_url=settings.sqs_queue_url,
-            receipt_handle=receipt,
-        )
+    for message in messages:
+        body = str(message["Body"])
+        receipt = str(message["ReceiptHandle"])
+        try:
+            async with session_factory() as session:
+                status = await process_sqs_message(
+                    session=session,
+                    hooks=hooks,
+                    settings=settings,
+                    body=body,
+                    redis=redis,
+                )
+        except Exception:
+            logger.exception("legacy_message_handler_failed")
+            if _stop.is_set():
+                break
+            continue
+        # Delete after success or after terminal FAILED/CANCELLED is committed (spec poison).
+        if status in _TERMINAL_ACK:
+            await asyncio.to_thread(
+                delete_message,
+                sqs,
+                queue_url=settings.sqs_queue_url,
+                receipt_handle=receipt,
+            )
+        if _stop.is_set():
+            break
     return True
 
 

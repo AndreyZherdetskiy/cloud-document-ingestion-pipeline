@@ -69,6 +69,48 @@ async def test_ingestion_run_once_deletes_test_event() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ingestion_run_once_acks_batch() -> None:
+    with mock_aws():
+        ingestion_consumer._stop.clear()
+        sqs = boto3.client("sqs", region_name="eu-central-1")
+        queue_url = sqs.create_queue(QueueName="test-ingest-s3-batch")["QueueUrl"]
+        sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(S3_TEST_EVENT))
+        sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(S3_TEST_EVENT))
+        settings = Settings(sqs_queue_url=queue_url, otel_sdk_disabled=True)
+        result = await run_once(
+            sqs=sqs,
+            session_factory=MagicMock(),
+            settings=settings,
+        )
+        assert result is True
+        assert _queue_depth(sqs, queue_url) == 0
+
+
+@pytest.mark.asyncio
+async def test_ingestion_run_once_continues_batch_after_handler_error() -> None:
+    with mock_aws():
+        ingestion_consumer._stop.clear()
+        sqs = boto3.client("sqs", region_name="eu-central-1")
+        queue_url = sqs.create_queue(QueueName="test-ingest-s3-partial")["QueueUrl"]
+        sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps({"bucket": "only-bucket"}))
+        sqs.send_message(QueueUrl=queue_url, MessageBody=json.dumps(S3_TEST_EVENT))
+        settings = Settings(sqs_queue_url=queue_url, otel_sdk_disabled=True)
+        factory = MagicMock()
+        ctx = MagicMock()
+        ctx.__aenter__ = AsyncMock(return_value=MagicMock())
+        ctx.__aexit__ = AsyncMock(return_value=None)
+        factory.return_value = ctx
+        with patch("doc_pipeline.worker.ingestion_consumer.delete_message") as delete_mock:
+            result = await run_once(
+                sqs=sqs,
+                session_factory=factory,
+                settings=settings,
+            )
+        assert result is True
+        assert delete_mock.call_count == 1
+
+
+@pytest.mark.asyncio
 async def test_ingestion_run_once_keeps_message_on_parse_error() -> None:
     with mock_aws():
         ingestion_consumer._stop.clear()

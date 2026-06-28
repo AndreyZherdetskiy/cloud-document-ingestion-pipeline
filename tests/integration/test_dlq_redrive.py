@@ -60,7 +60,10 @@ def test_poison_message_redrives_to_dlq() -> None:
     )["QueueUrl"]
     try:
         sqs.send_message(QueueUrl=main_url, MessageBody="integration-poison")
-        # LocalStack 4.14 redrives on the receive *after* maxReceiveCount is hit.
+        # LocalStack 4.14.0 community pin redrives on the receive *after*
+        # maxReceiveCount is hit (sixth ReceiveMessage when maxReceiveCount=5).
+        # AWS semantics are covered by the moto unit test; this integration
+        # fails (does not skip) if LocalStack does not move the message.
         # Expire visibility immediately so five receive cycles stay fast.
         for _ in range(5):
             resp = sqs.receive_message(

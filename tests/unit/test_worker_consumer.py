@@ -12,7 +12,6 @@ from tests.fixtures.worker_session import FakeWorkerSession, event_for
 
 from doc_pipeline.config.settings import Settings
 from doc_pipeline.domain.enums import DocumentStatus, DocumentType
-from doc_pipeline.domain.errors import NotFoundError
 from doc_pipeline.domain.hooks.stubs import StubExtractHook, StubOcrHook, StubVirusScanHook
 from doc_pipeline.domain.ids import generate_uuidv7
 from doc_pipeline.domain.models.document import Document
@@ -68,13 +67,31 @@ async def test_run_once_deletes_message_on_processed() -> None:
         settings = Settings(sqs_queue_url=queue_url, otel_sdk_disabled=True)
         hooks = (StubVirusScanHook(clean=True), StubOcrHook(), StubExtractHook())
         session = FakeWorkerSession(doc, tenant)
-        await run_once(
-            sqs=sqs,
-            session_factory=_session_factory(session),
-            settings=settings,
-            hooks=hooks,
-        )
+        order: list[str] = []
+        orig_commit = session.commit
+
+        async def commit_and_record() -> None:
+            order.append("commit")
+            await orig_commit()
+
+        session.commit = commit_and_record  # type: ignore[method-assign]
+        orig_delete = consumer.delete_message
+
+        def delete_and_record(*args: object, **kwargs: object) -> None:
+            order.append("delete")
+            orig_delete(*args, **kwargs)
+
+        with patch("doc_pipeline.worker.consumer.delete_message", side_effect=delete_and_record):
+            await run_once(
+                sqs=sqs,
+                session_factory=_session_factory(session),
+                settings=settings,
+                hooks=hooks,
+            )
         assert _queue_depth(sqs, queue_url) == 0
+        assert order[-1] == "delete"
+        assert order[:-1]
+        assert all(item == "commit" for item in order[:-1])
 
 
 @pytest.mark.asyncio
@@ -114,11 +131,11 @@ async def test_run_once_keeps_message_when_handler_raises() -> None:
 
         session.scalar = scalar_missing  # type: ignore[method-assign]
         with patch("doc_pipeline.worker.consumer.delete_message") as delete_mock:
-            with pytest.raises(NotFoundError):
-                await run_once(
-                    sqs=sqs,
-                    session_factory=_session_factory(session),
-                    settings=settings,
-                    hooks=hooks,
-                )
+            result = await run_once(
+                sqs=sqs,
+                session_factory=_session_factory(session),
+                settings=settings,
+                hooks=hooks,
+            )
+            assert result is True
             delete_mock.assert_not_called()

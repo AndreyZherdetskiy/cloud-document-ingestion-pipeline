@@ -50,34 +50,21 @@ def delete_message(client: BaseClient, *, queue_url: str, receipt_handle: str) -
     client.delete_message(QueueUrl=queue_url, ReceiptHandle=receipt_handle)
 
 
-async def run_once(
+async def _handle_one_message(
     *,
     sqs: BaseClient,
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     hooks: tuple[VirusScanHook, OcrHook, ExtractHook],
-    redis: RedisSetNx | None = None,
-) -> bool:
-    """Receive up to one processing message. Returns False when stop is set mid-idle."""
-    if _stop.is_set():
-        return False
-    response: dict[str, Any] = await asyncio.to_thread(
-        sqs.receive_message,
-        QueueUrl=settings.sqs_processing_queue_url,
-        MaxNumberOfMessages=1,
-        WaitTimeSeconds=10,
-        VisibilityTimeout=settings.sqs_visibility_timeout_seconds,
-    )
-    messages = response.get("Messages") or []
-    if not messages:
-        return True
-    message = messages[0]
-    body = str(message["Body"])
-    receipt = str(message["ReceiptHandle"])
+    redis: RedisSetNx | None,
+    body: str,
+    receipt: str,
+) -> None:
     with _tracer.start_as_current_span(
         "process.handle_message",
         attributes={"messaging.system": "aws.sqs"},
     ):
+        status: DocumentStatus | None = None
         try:
             parsed = parse_process_document_message(body)
             span = trace.get_current_span()
@@ -94,14 +81,47 @@ async def run_once(
             logger.info("processing_message_handled", status=status.value)
         except Exception:
             logger.exception("processing_message_handler_failed")
-            return True
-    if status in _TERMINAL_ACK:
-        await asyncio.to_thread(
-            delete_message,
-            sqs,
-            queue_url=settings.sqs_processing_queue_url,
-            receipt_handle=receipt,
+            return
+        if status in _TERMINAL_ACK:
+            await asyncio.to_thread(
+                delete_message,
+                sqs,
+                queue_url=settings.sqs_processing_queue_url,
+                receipt_handle=receipt,
+            )
+
+
+async def run_once(
+    *,
+    sqs: BaseClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    hooks: tuple[VirusScanHook, OcrHook, ExtractHook],
+    redis: RedisSetNx | None = None,
+) -> bool:
+    """Receive a batch; ACK each message only after durable terminal status."""
+    if _stop.is_set():
+        return False
+    response: dict[str, Any] = await asyncio.to_thread(
+        sqs.receive_message,
+        QueueUrl=settings.sqs_processing_queue_url,
+        MaxNumberOfMessages=settings.sqs_max_number_of_messages,
+        WaitTimeSeconds=10,
+        VisibilityTimeout=settings.sqs_visibility_timeout_seconds,
+    )
+    messages = response.get("Messages") or []
+    for message in messages:
+        await _handle_one_message(
+            sqs=sqs,
+            session_factory=session_factory,
+            settings=settings,
+            hooks=hooks,
+            redis=redis,
+            body=str(message["Body"]),
+            receipt=str(message["ReceiptHandle"]),
         )
+        if _stop.is_set():
+            break
     return True
 
 

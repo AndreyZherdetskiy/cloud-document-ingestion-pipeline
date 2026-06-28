@@ -18,6 +18,7 @@ from doc_pipeline.config.settings import get_settings
 REPO_ROOT = Path(__file__).resolve().parents[2]
 API_BASE = os.environ.get("BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 HEALTH_URL = f"{API_BASE}/v1/health"
+GRAFANA_HEALTH_URL = os.environ.get("GRAFANA_HEALTH_URL", "http://127.0.0.1:3000/api/health")
 POLL_TIMEOUT_SECONDS = 180.0
 POLL_INTERVAL_SECONDS = 2.0
 
@@ -53,6 +54,11 @@ def _require_live_api() -> None:
         )
 
 
+def _require_live_grafana() -> None:
+    if not _url_returns_200(GRAFANA_HEALTH_URL):
+        pytest.skip(f"Grafana not healthy at {GRAFANA_HEALTH_URL} — start compose for optional e2e")
+
+
 def _require_jwt_private_key() -> str:
     private_pem = get_settings().jwt_private_key_pem.strip()
     if not private_pem:
@@ -82,6 +88,12 @@ def auth_token_acme(api_base_url: str) -> str:
         audience=settings.jwt_audience,
         sub="e2e-acme",
     )
+
+
+@pytest.fixture(scope="session")
+def grafana_health_url() -> str:
+    _require_live_grafana()
+    return GRAFANA_HEALTH_URL
 
 
 @pytest.fixture(scope="session")

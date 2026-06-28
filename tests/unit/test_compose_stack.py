@@ -17,6 +17,7 @@ GRAFANA_DASHBOARDS_YML = Path("infra/grafana/provisioning/dashboards/dashboards.
 GRAFANA_DASHBOARDS_PATH = "/etc/grafana/dashboards"
 FORBIDDEN_GRAFANA_DASHBOARDS_PATH = "/var/lib/grafana/dashboards"
 GRAFANA_PLUGINS_PATH = "/etc/grafana/plugins"
+FORBIDDEN_GRAFANA_PLUGINS_PATH = "/var/lib/grafana/plugins"
 
 BAKED_CONFIG_SERVICES = (
     "localstack",
@@ -213,6 +214,7 @@ def test_grafana_plugins_path_off_data_volume(compose_services: dict) -> None:
     """Plugins must live under /etc/grafana so grafana-data cannot shadow them (C2)."""
     dockerfile = GRAFANA_DOCKERFILE.read_text(encoding="utf-8")
     assert GRAFANA_PLUGINS_PATH in dockerfile
+    assert FORBIDDEN_GRAFANA_PLUGINS_PATH not in dockerfile
     plugins_idx = dockerfile.index(GRAFANA_PLUGINS_PATH)
     root_idx = dockerfile.rindex("USER root", 0, plugins_idx)
     assert root_idx < plugins_idx, "plugins mkdir must run as USER root"
@@ -220,6 +222,7 @@ def test_grafana_plugins_path_off_data_volume(compose_services: dict) -> None:
     grafana = compose_services["grafana"]
     env = grafana.get("environment") or {}
     assert env.get("GF_PATHS_PLUGINS") == GRAFANA_PLUGINS_PATH
+    assert env.get("GF_PATHS_PLUGINS") != FORBIDDEN_GRAFANA_PLUGINS_PATH
 
 
 def test_grafana_data_volume_mounts_var_lib_only(
@@ -298,6 +301,7 @@ def test_makefile_perf_up_scales_consumers_only() -> None:
     assert "--scale ingestion-worker=2" in block
     assert "--scale processing-worker=2" in block
     assert "--scale api" not in block
+    assert "docker image prune" in block
 
 
 def test_compose_up_has_no_scale() -> None:
@@ -320,3 +324,27 @@ def test_makefile_load_k6_health_uses_stdin_and_compose_network() -> None:
     assert "grafana/k6 run - < scripts/k6/ceiling_health_rps.js" in block
     assert "--network doc-pipeline" in block
     assert "AUTH_TOKEN" not in block
+
+
+def test_perf_overlay_api_pool_is_prod_like(perf_compose_data: dict) -> None:
+    env = perf_compose_data["services"]["api"]["environment"]
+    assert env.get("OTEL_SDK_DISABLED") == "true"
+    assert env.get("DATABASE_POOL_SIZE") == "5"
+    assert env.get("DATABASE_MAX_OVERFLOW") == "5"
+
+
+@pytest.mark.parametrize(
+    "service",
+    ["ingestion-worker", "processing-worker", "stuck-scanner"],
+)
+def test_perf_overlay_worker_env(perf_compose_data: dict, service: str) -> None:
+    env = perf_compose_data["services"][service]["environment"]
+    assert env.get("OTEL_SDK_DISABLED") == "true"
+    assert env.get("DATABASE_POOL_SIZE") == "3"
+    assert env.get("DATABASE_MAX_OVERFLOW") == "2"
+
+
+@pytest.mark.parametrize("service", ["ingestion-worker", "processing-worker"])
+def test_perf_overlay_sqs_batch_size(perf_compose_data: dict, service: str) -> None:
+    env = perf_compose_data["services"][service]["environment"]
+    assert env.get("SQS_MAX_NUMBER_OF_MESSAGES") == "10"
