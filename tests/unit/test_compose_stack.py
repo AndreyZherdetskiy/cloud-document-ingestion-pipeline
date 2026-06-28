@@ -213,6 +213,9 @@ def test_grafana_plugins_path_off_data_volume(compose_services: dict) -> None:
     """Plugins must live under /etc/grafana so grafana-data cannot shadow them (C2)."""
     dockerfile = GRAFANA_DOCKERFILE.read_text(encoding="utf-8")
     assert GRAFANA_PLUGINS_PATH in dockerfile
+    plugins_idx = dockerfile.index(GRAFANA_PLUGINS_PATH)
+    root_idx = dockerfile.rindex("USER root", 0, plugins_idx)
+    assert root_idx < plugins_idx, "plugins mkdir must run as USER root"
 
     grafana = compose_services["grafana"]
     env = grafana.get("environment") or {}
@@ -309,3 +312,11 @@ def test_stack_down_includes_perf_overlay_and_remove_orphans() -> None:
     down = text.split("stack-down:")[1].split("\n\n")[0]
     assert "docker-compose.perf.yml" in down
     assert "--remove-orphans" in down
+
+
+def test_makefile_load_k6_health_uses_stdin_and_compose_network() -> None:
+    text = MAKEFILE_PATH.read_text(encoding="utf-8")
+    block = text.split("load-k6-health:")[1].split("\n\n")[0]
+    assert "grafana/k6 run - < scripts/k6/ceiling_health_rps.js" in block
+    assert "--network doc-pipeline" in block
+    assert "AUTH_TOKEN" not in block
