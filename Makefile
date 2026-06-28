@@ -20,7 +20,7 @@ help:
 	@echo "  make typecheck     mypy on src/doc_pipeline"
 	@echo "  make test-unit     pytest unit (excludes integration/e2e)"
 	@echo "  make test-integration  pytest -m integration"
-	@echo "  make test-e2e      pytest -m e2e (may collect 0)"
+	@echo "  make test-e2e      pytest -m e2e (skipped when API down)"
 	@echo ""
 	@echo "JWT / live demo:"
 	@echo "  make gen-dev-jwt   generate RSA pair → .local/jwt + patch .env"

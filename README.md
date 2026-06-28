@@ -53,6 +53,7 @@ make migrate
 make seed
 make seed-prod-like
 make live-demo      # create → presign → PUT → poll PROCESSED
+make test-e2e       # pytest live stack (skipped when API down)
 ```
 
 **Prod-like characterization (not spec §8 SLA):** `make perf-up` applies `docker-compose.perf.yml` — one API replica with four uvicorn workers, `RATE_LIMIT_PER_MINUTE=0`, small SQLAlchemy pools, OTel off, and two replicas each of `ingestion-worker` and `processing-worker`. Tear down with `make stack-down` (includes the perf overlay so scaled replicas do not linger).
