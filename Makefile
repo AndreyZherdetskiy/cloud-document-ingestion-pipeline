@@ -54,7 +54,10 @@ test-integration:
 	uv run pytest -m integration -q
 
 test-e2e:
-	uv run pytest -m e2e -q
+	uv run pytest -m e2e -q; \
+	status=$$?; \
+	if [ $$status -eq 5 ]; then echo "no e2e tests collected (ok)"; exit 0; fi; \
+	exit $$status
 
 gen-dev-jwt:
 	uv run python scripts/gen_dev_jwt_keys.py
