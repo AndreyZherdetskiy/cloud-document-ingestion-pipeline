@@ -24,6 +24,8 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://test:test@localhost:5432/doc_pipeline",
         alias="DATABASE_URL",
     )
+    database_pool_size: int = Field(default=5, alias="DATABASE_POOL_SIZE")
+    database_max_overflow: int = Field(default=10, alias="DATABASE_MAX_OVERFLOW")
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     aws_endpoint_url: str | None = Field(default=None, alias="AWS_ENDPOINT_URL")
     aws_region: str = Field(default="eu-central-1", alias="AWS_REGION")

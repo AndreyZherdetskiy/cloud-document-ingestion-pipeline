@@ -29,6 +29,8 @@ class InMemoryRedisCache:
 
     async def check_rate_limit(self, key: str, *, limit: int, window_seconds: int = 60) -> bool:
         del window_seconds  # fixed-window ignored in unit fake
+        if limit <= 0:
+            return True
         if self.force_exhausted:
             return False
         current = self._counts.get(key, 0) + 1
@@ -57,6 +59,8 @@ class RedisRateLimitClient:
         self._client: Any = redis.from_url(url, decode_responses=True)
 
     async def check_rate_limit(self, key: str, *, limit: int, window_seconds: int = 60) -> bool:
+        if limit <= 0:
+            return True
         pipe = self._client.pipeline()
         pipe.incr(key)
         pipe.expire(key, window_seconds, nx=True)
