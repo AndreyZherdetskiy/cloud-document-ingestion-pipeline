@@ -60,8 +60,8 @@ def test_poison_message_redrives_to_dlq() -> None:
     )["QueueUrl"]
     try:
         sqs.send_message(QueueUrl=main_url, MessageBody="integration-poison")
-        # LocalStack only commits ApproximateReceiveCount after visibility expires
-        # (vis=0 receive-loop does not redrive). Match AWS: 5 receives without delete.
+        # LocalStack 4.14 redrives on the receive *after* maxReceiveCount is hit.
+        # Expire visibility immediately so five receive cycles stay fast.
         for _ in range(5):
             resp = sqs.receive_message(
                 QueueUrl=main_url,
@@ -70,10 +70,23 @@ def test_poison_message_redrives_to_dlq() -> None:
                 WaitTimeSeconds=1,
             )
             assert resp.get("Messages"), "expected message on main queue before redrive"
-            time.sleep(1.2)
+            receipt = resp["Messages"][0]["ReceiptHandle"]
+            sqs.change_message_visibility(
+                QueueUrl=main_url,
+                ReceiptHandle=receipt,
+                VisibilityTimeout=0,
+            )
+
+        # Sixth receive on main triggers redrive; main may already be empty.
+        sqs.receive_message(
+            QueueUrl=main_url,
+            MaxNumberOfMessages=1,
+            VisibilityTimeout=1,
+            WaitTimeSeconds=1,
+        )
 
         deadline = time.time() + 10
-        dlq_depth = 0
+        dlq_has_message = False
         while time.time() < deadline:
             dlq_depth = int(
                 sqs.get_queue_attributes(
@@ -82,12 +95,23 @@ def test_poison_message_redrives_to_dlq() -> None:
                 )["Attributes"]["ApproximateNumberOfMessages"]
             )
             if dlq_depth >= 1:
+                dlq_has_message = True
+                break
+            dlq_resp = sqs.receive_message(
+                QueueUrl=dlq_url,
+                MaxNumberOfMessages=1,
+                WaitTimeSeconds=1,
+            )
+            if dlq_resp.get("Messages"):
+                dlq_has_message = True
                 break
             time.sleep(0.25)
-        if dlq_depth < 1:
-            pytest.skip(
-                "LocalStack did not move the poison message to the DLQ after 5 "
-                "visibility expiries; moto unit test covers AWS RedrivePolicy"
+
+        if not dlq_has_message:
+            pytest.fail(
+                "LocalStack did not move the poison message to the DLQ after the "
+                "sixth receive (maxReceiveCount=5); moto unit test covers AWS "
+                "RedrivePolicy semantics"
             )
     finally:
         for url in (main_url, dlq_url):
