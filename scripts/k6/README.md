@@ -10,12 +10,11 @@
 
 ## JWT caveat
 
-- API mounts **public key only**.
-- Host file comes from `make gen-dev-jwt` (gitignored JWT files); run it and recreate `api` so the mounted key matches your minted tokens.
-- Container env: `JWT_PUBLIC_KEY_PATH` = `/keys/jwt/public.pem` (Compose bind-mounts host `JWT_PUBLIC_KEY_FILE` onto that path).
-- `.env` `JWT_PUBLIC_KEY_PEM` stub is not what the API container uses.
-Live `POST /v1/documents` returns **401** without a Bearer JWT signed with the matching private key (`make mint-jwt` or `AUTH_TOKEN`).
-Do **not** commit PEM private keys.
+- API verifies JWT from **`JWT_PUBLIC_KEY_PEM`** (Compose interpolates `.env`; `JWT_PUBLIC_KEY_PATH` is empty — no `public.pem` bind-mount).
+- Host minting: `make gen-dev-jwt` writes gitignored `.local/jwt/*.pem` and patches `.env`; then `make mint-jwt` / `AUTH_TOKEN`.
+- Recreate the `api` container after rotating keys so Compose re-reads `JWT_PUBLIC_KEY_PEM`.
+- Live `POST /v1/documents` returns **401** without a Bearer JWT signed by the matching private key.
+- Do **not** commit PEM private keys.
 
 ## Run
 
@@ -27,4 +26,4 @@ k6 run scripts/k6/peak_5000_docs_h.js
 AUTH_TOKEN="eyJ..." k6 run scripts/k6/peak_5000_docs_h.js
 ```
 
-Default `BASE_URL=http://localhost:8000`. When WSL host **`:8000` RST**, run k6 on the Compose network instead, e.g. `docker run --rm --network doc-pipeline -v "$(pwd):/app" -w /app grafana/k6 run -e BASE_URL=http://api:8000 -e AUTH_TOKEN=... scripts/k6/peak_5000_docs_h.js`. S3 PUT uses the API's `presigned_url` plus `required_headers` — do not invent an unsigned bucket URL.
+Default `BASE_URL=http://localhost:8000`. When WSL host **`:8000` RST**, run k6 on the Compose network. Docker Desktop on WSL needs a Windows mount path, e.g. `-v "$(wslpath -w "$(pwd)"):/app"`. Example: `docker run --rm --network doc-pipeline -v "$(wslpath -w "$(pwd)"):/app" -w /app grafana/k6 run -e BASE_URL=http://api:8000 scripts/k6/peak_5000_docs_h.js`. With `AUTH_TOKEN` unset the script hits `/v1/health` only (honest skip of create→PROCESSED). S3 PUT uses the API's `presigned_url` plus `required_headers` — do not invent an unsigned bucket URL.
