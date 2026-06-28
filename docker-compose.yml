@@ -145,6 +145,7 @@ services:
       GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER}
       GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_PATHS_PLUGINS: /etc/grafana/plugins
     volumes:
       - grafana-data:/var/lib/grafana
     depends_on:

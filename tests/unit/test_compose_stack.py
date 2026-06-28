@@ -16,6 +16,7 @@ GRAFANA_DASHBOARDS_YML = Path("infra/grafana/provisioning/dashboards/dashboards.
 
 GRAFANA_DASHBOARDS_PATH = "/etc/grafana/dashboards"
 FORBIDDEN_GRAFANA_DASHBOARDS_PATH = "/var/lib/grafana/dashboards"
+GRAFANA_PLUGINS_PATH = "/etc/grafana/plugins"
 
 BAKED_CONFIG_SERVICES = (
     "localstack",
@@ -206,6 +207,16 @@ def test_grafana_dashboards_provisioned_outside_data_volume() -> None:
     assert providers, "dashboards.yml: expected providers"
     path = providers[0].get("options", {}).get("path")
     assert path == GRAFANA_DASHBOARDS_PATH
+
+
+def test_grafana_plugins_path_off_data_volume(compose_services: dict) -> None:
+    """Plugins must live under /etc/grafana so grafana-data cannot shadow them (C2)."""
+    dockerfile = GRAFANA_DOCKERFILE.read_text(encoding="utf-8")
+    assert GRAFANA_PLUGINS_PATH in dockerfile
+
+    grafana = compose_services["grafana"]
+    env = grafana.get("environment") or {}
+    assert env.get("GF_PATHS_PLUGINS") == GRAFANA_PLUGINS_PATH
 
 
 def test_grafana_data_volume_mounts_var_lib_only(
