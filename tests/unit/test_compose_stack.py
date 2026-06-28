@@ -7,6 +7,7 @@ import pytest
 import yaml
 
 COMPOSE_PATH = Path("docker-compose.yml")
+PERF_COMPOSE_PATH = Path("docker-compose.perf.yml")
 MAKEFILE_PATH = Path("Makefile")
 COLLECTOR_PATH = Path("infra/otel/collector.yaml")
 PROMETHEUS_PATH = Path("infra/prometheus/prometheus.yml")
@@ -52,6 +53,11 @@ def compose_data() -> dict:
 @pytest.fixture(scope="module")
 def compose_services(compose_data: dict) -> dict:
     return compose_data["services"]
+
+
+@pytest.fixture(scope="module")
+def perf_compose_data() -> dict:
+    return yaml.safe_load(PERF_COMPOSE_PATH.read_text(encoding="utf-8"))
 
 
 def test_compose_project_name(compose_data: dict) -> None:
@@ -250,3 +256,45 @@ def test_no_tempo_or_kafka_services(compose_services: dict) -> None:
     for name in compose_services:
         assert "tempo" not in name.lower()
         assert "kafka" not in name.lower()
+
+
+def test_perf_compose_file_exists() -> None:
+    assert PERF_COMPOSE_PATH.is_file()
+
+
+def test_perf_overlay_api_uvicorn_workers(perf_compose_data: dict) -> None:
+    cmd = perf_compose_data["services"]["api"]["command"]
+    flat = " ".join(str(part) for part in cmd)
+    assert "--workers" in flat
+    assert "4" in flat
+    assert "doc_pipeline.main:create_app" in flat
+    assert "--factory" in flat
+
+
+def test_perf_overlay_api_rate_limit_unlimited(perf_compose_data: dict) -> None:
+    env = perf_compose_data["services"]["api"]["environment"]
+    assert env.get("RATE_LIMIT_PER_MINUTE") == "0"
+
+
+def test_makefile_perf_up_scales_consumers_only() -> None:
+    text = MAKEFILE_PATH.read_text(encoding="utf-8")
+    assert "perf-up:" in text
+    block = text.split("perf-up:")[1].split("\n\n")[0]
+    assert "docker-compose.perf.yml" in block
+    assert "--scale ingestion-worker=2" in block
+    assert "--scale processing-worker=2" in block
+    assert "--scale api" not in block
+
+
+def test_compose_up_has_no_scale() -> None:
+    text = MAKEFILE_PATH.read_text(encoding="utf-8")
+    after = text.split("compose-up:", 1)[1]
+    target_body = after.split("\n\n", 1)[0]
+    assert "--scale" not in target_body
+
+
+def test_stack_down_includes_perf_overlay_and_remove_orphans() -> None:
+    text = MAKEFILE_PATH.read_text(encoding="utf-8")
+    down = text.split("stack-down:")[1].split("\n\n")[0]
+    assert "docker-compose.perf.yml" in down
+    assert "--remove-orphans" in down

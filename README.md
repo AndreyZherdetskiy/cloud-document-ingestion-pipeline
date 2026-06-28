@@ -42,7 +42,7 @@ Compose project name / network: **`doc-pipeline`** (Make always passes `-p`; no 
 
 ## Quick start
 
-Prerequisites: `uv`, Docker Compose. Bring the stack up (`make compose-up`) before migrate/seed/live-demo.
+Prerequisites: `uv`, Docker Compose. Bring data plane up (`make compose-up`), then observability (`make observability-up`) and app services (`make stack-up`), or use `make stack-up` alone for the full stack. Default `compose-up` is postgres+redis+localstack only.
 
 ```bash
 cp .env.example .env
@@ -54,6 +54,8 @@ make seed
 make seed-prod-like
 make live-demo      # create → presign → PUT → poll PROCESSED
 ```
+
+**Prod-like characterization (not spec §8 SLA):** `make perf-up` applies `docker-compose.perf.yml` — one API replica with four uvicorn workers, `RATE_LIMIT_PER_MINUTE=0`, small SQLAlchemy pools, OTel off, and two replicas each of `ingestion-worker` and `processing-worker`. Tear down with `make stack-down` (includes the perf overlay so scaled replicas do not linger).
 
 Live API contract: [`http://localhost:8000/v1/docs`](http://localhost:8000/v1/docs). Swagger is at `/v1/docs`; `/docs` redirects there.
 

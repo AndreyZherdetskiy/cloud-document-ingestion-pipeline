@@ -1,4 +1,4 @@
-.PHONY: help ci lint typecheck test-unit test-integration test-e2e export-openapi compose-up observability-up migrate seed seed-prod-like tf-validate ensure-terraform run-ingestion-worker run-processing-worker run-stuck-scanner gen-dev-jwt mint-jwt live-demo hooks
+.PHONY: help ci lint typecheck test-unit test-integration test-e2e export-openapi compose-up observability-up stack-up stack-down perf-up migrate seed seed-prod-like tf-validate ensure-terraform run-ingestion-worker run-processing-worker run-stuck-scanner gen-dev-jwt mint-jwt live-demo hooks
 
 # Explicit -p beats COMPOSE_PROJECT_NAME env so sibling stacks never collide.
 COMPOSE_PROJECT ?= doc-pipeline
@@ -36,7 +36,8 @@ help:
 	@echo "  make run-stuck-scanner      python -m doc_pipeline.worker.stuck_main"
 	@echo ""
 	@echo "Compose / data / infra:"
-	@echo "  make compose-up / observability-up / migrate / seed / seed-prod-like"
+	@echo "  make compose-up / observability-up / stack-up / stack-down / perf-up"
+	@echo "  make migrate / seed / seed-prod-like"
 	@echo "  make tf-validate   init -backend=false + validate per module and environment root"
 
 ci: lint typecheck test-unit
@@ -91,6 +92,17 @@ compose-up:
 observability-up:
 	$(COMPOSE) up -d --build --wait jaeger otel-collector prometheus grafana
 	docker image prune -af --filter "label=com.docker.compose.project=$(COMPOSE_PROJECT)"
+
+stack-up:
+	$(COMPOSE) up -d --build --wait
+	docker image prune -af --filter "label=com.docker.compose.project=$(COMPOSE_PROJECT)"
+
+stack-down:
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.perf.yml down --remove-orphans
+
+perf-up:
+	$(COMPOSE) -f docker-compose.yml -f docker-compose.perf.yml up -d --build --wait \
+		--scale ingestion-worker=2 --scale processing-worker=2
 
 migrate:
 	uv run alembic upgrade head

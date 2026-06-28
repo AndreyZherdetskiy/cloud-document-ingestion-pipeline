@@ -297,11 +297,14 @@ cp .env.example .env
 uv sync --group dev
 make hooks          # or: uv run pre-commit install
 make compose-up
+make stack-up       # full stack (--build --wait; 1 process per service)
+make perf-up        # non-default overlay: uvicorn --workers 4, RATE_LIMIT 0, 2× ingestion + 2× processing; characterization only — not spec §8 SLA
 make migrate
 make seed && make seed-prod-like
 make ci
 make export-openapi
 make tf-validate
+make stack-down     # tear down including docker-compose.perf.yml (--remove-orphans; no -v)
 ```
 
 Live: `http://localhost:8000/v1/docs`, Grafana `:3000`, Jaeger `:16686`, LocalStack `:4566`.
@@ -380,11 +383,12 @@ Split ingestion/processing workers; native SQS long-poll; optional Celery stuck 
 
 Multi-tenant hardening ADR-014 (row-level keep); DR docs (RPO/RTO); Object Lock docs; Cost Explorer narrative; k6 5000 docs/h local/LocalStack; read replica plan — [`docs/plans/stage3-read-replica.md`](docs/plans/stage3-read-replica.md) (ADR-011). K8s/EKS is **not** Must. Evidence: local harness `stage3-dod-evidence.md` — **Do not declare Stage Done.**
 
-### 10.5. Ad-hoc — stack versions + full audit
+### 10.5. Ad-hoc — stack versions + full audit + perf overlay
 
 Local gitignored harness (not Stage N; no Stage Done; no commit unless asked):
 
 - `PROMPT_STACK_VERSION_UPGRADE.md` — current stable FastAPI/boto3/Redis + **SQS/LocalStack** (not Kafka); then Phase A of full audit
 - `PROMPT_FULL_PROJECT_AUDIT_AND_DOCS.md` — live seed audit + EN operator docs + independent RU handbook
+- **Stage 3 perf overlay** — `docker-compose.perf.yml` + `make perf-up` (4 uvicorn workers, `RATE_LIMIT_PER_MINUTE=0`, small DB pools, OTel off, 2× ingestion + 2× processing workers); characterization only — not spec §8 SLA. Default `compose-up` stays postgres+redis+localstack; `make stack-down` always includes the perf file so scaled replicas do not linger.
 
 Always attach `PROMPT_COMMON.md`. Subagents: `composer-2.5` or `cursor-grok-4.5-high`; Implementer ≠ Reviewer.
