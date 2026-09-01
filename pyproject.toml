@@ -28,11 +28,11 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pytest>=8,<9",
-    "pytest-asyncio>=0.24,<0.25",
+    "pytest>=8,<10",
+    "pytest-asyncio>=0.24,<1.5",
     "httpx>=0.28,<0.29",
-    "ruff>=0.8,<0.9",
-    "mypy>=1.13,<1.14",
+    "ruff>=0.8,<0.17",
+    "mypy>=1.13,<2.4",
     "PyYAML>=6",
     "moto[s3]>=5,<6",
     "pre-commit>=4,<5",
