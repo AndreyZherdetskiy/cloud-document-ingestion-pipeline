@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi>=0.141,<0.142",
-    "uvicorn[standard]>=0.52,<0.53",
+    "uvicorn[standard]>=0.52,<0.54",
     "pydantic>=2.10,<3",
     "pydantic-settings>=2.6,<3",
     "sqlalchemy[asyncio]>=2.0,<2.1",
@@ -28,11 +28,11 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pytest>=8,<9",
-    "pytest-asyncio>=0.24,<0.25",
+    "pytest>=8,<10",
+    "pytest-asyncio>=0.24,<1.5",
     "httpx>=0.28,<0.29",
-    "ruff>=0.8,<0.9",
-    "mypy>=1.13,<1.14",
+    "ruff>=0.8,<0.17",
+    "mypy>=1.13,<2.4",
     "PyYAML>=6",
     "moto[s3]>=5,<6",
     "pre-commit>=4,<5",
